@@ -5,8 +5,8 @@ name: Publish
 # docs/partner on main of Telcoin-Association/tn-node-deployment; nothing from that
 # repo is stored here. build-site.sh checks the PDFs and the built tree before
 # anything is uploaded, so a failed check leaves the live site as it was.
-# After a partner PDF change merges in tn-node-deployment, publish it with a manual
-# run of this workflow on main (Actions tab, or
+# After a change under docs/partner merges in tn-node-deployment, publish it with a
+# manual run of this workflow on main (Actions tab, or
 # `gh workflow run publish.yml --repo Telcoin-Association/tn-partner-site --ref main`).
 on:
   push:
