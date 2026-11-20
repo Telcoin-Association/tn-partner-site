@@ -3,13 +3,17 @@
 #
 # Builds the run.telcoin.network site from the partner PDFs committed in a
 # tn-node-deployment checkout. <src> is the root of that checkout and is only
-# read. <out> must not exist or must be an empty directory. The site is built in
-# a temporary sibling of <out> and moved into place only after every check
+# read. Every file the build reads from it must hold exactly the bytes HEAD
+# records, so the site is a function of HEAD and source.txt names that commit.
+# <out> must not exist or must be an empty directory. The site is built in a
+# temporary sibling of <out> and moved into place only after every check
 # passed, so a failed run leaves no <out>.
 #
 # Exit codes: 0 built, 1 a gate failed, 2 usage or environment error.
 set -euo pipefail
 export LC_ALL=C
+# A relative cd below must not search CDPATH.
+unset CDPATH
 
 readonly BASE_URL="https://run.telcoin.network"
 readonly SOURCE_REPO="https://github.com/Telcoin-Association/tn-node-deployment"
@@ -20,13 +24,19 @@ readonly STEMS=(testnet-node-requirements mainnet-node-requirements mno-node-gui
 readonly ALIASES=(testnet mainnet guide spec)
 
 # Shared assets, as "<path under docs/partner/assets> <path in the site>".
+readonly LOGO=logos/telcoin-network-light.svg
 readonly ASSETS=(
     "fonts/geist/Geist-Regular.woff2 assets/fonts/Geist-Regular.woff2"
     "fonts/geist/Geist-SemiBold.woff2 assets/fonts/Geist-SemiBold.woff2"
     "fonts/geist/LICENSE.txt assets/fonts/LICENSE.txt"
     "fonts/geist/OFL.txt assets/fonts/OFL.txt"
-    "logos/telcoin-network-light.svg assets/telcoin-network.svg"
+    "$LOGO assets/telcoin-network.svg"
 )
+# Gate 1: the SHA-256 of the reviewed logo. The site serves the SVG from its own
+# origin and an SVG can carry script, so only the reviewed file is published.
+# After a logo change in tn-node-deployment, review the new file and put its
+# sha256sum here.
+readonly LOGO_SHA256=3094cdd0523665d8548737ac40e299c1ecd36670a9b002f7f30d87868fa2b528
 
 # Gate 6: the exact file list of the built site, sorted as `LC_ALL=C sort` does.
 readonly EXPECTED_FILES="404.html
@@ -114,8 +124,10 @@ human_size() {
         else printf "%.1f MB", b / 1000000 }'
 }
 
-# git_src ARGS...: git in <src>. No optional locks, so git status does not
-# rewrite the index, and no fsmonitor hook, so nothing configured in <src> runs.
+# git_src ARGS...: git in <src>. The script runs only rev-parse and
+# hash-object --no-filters there; neither reads the index nor applies a filter,
+# so nothing configured in <src> runs. No optional locks and no fsmonitor hook
+# as a second guard.
 git_src() {
     git -C "$src" -c core.fsmonitor=false --no-optional-locks "$@"
 }
@@ -140,10 +152,12 @@ elif [[ -d $out && -n $(ls -A -- "$out") ]]; then
 fi
 out_parent=$(dirname -- "$out")
 [[ -d $out_parent ]] || die "parent directory of $out does not exist"
-out_parent=$(cd -- "$out_parent" && pwd -P)
+out_parent=$(cd -- "$out_parent" && pwd -P) || die "cannot enter $out_parent"
+# From here on <src> is absolute: awk reads a relative file operand shaped like
+# v=1/... as a variable assignment.
 if [[ -d $src ]]; then
-    src_abs=$(cd -- "$src" && pwd -P)
-    [[ $out_parent/ != "$src_abs"/* ]] || die "$out is inside $src; the build never writes under <src>"
+    src=$(cd -- "$src" && pwd -P) || die "cannot enter $src"
+    [[ $out_parent/ != "$src"/* ]] || die "$out is inside $src; the build never writes under <src>"
 fi
 
 site_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
@@ -172,35 +186,54 @@ if [[ ! -d $partner ]]; then
     fail 0 "$src has no docs/partner directory"
     exit 1
 fi
-if ! err=$(git_src rev-parse --show-prefix 2>&1); then
-    fail 0 "$src is not a git checkout: ${err%%$'\n'*}"
-elif [[ -n $err ]]; then
-    fail 0 "$src is not the top of its git checkout (it is $err)"
+# <src> is the top of a git checkout whose HEAD holds docs/partner as a tree
+# (with the trailing slash, rev-parse accepts only a tree).
+head_ok=false
+if ! prefix=$(git_src rev-parse --show-prefix 2>"$work/git.err"); then
+    fail 0 "$src is not a git checkout: $(head -n 1 -- "$work/git.err")"
+elif [[ -n $prefix ]]; then
+    fail 0 "$src is not the top of its git checkout (it is $prefix)"
 elif ! source_commit=$(git_src rev-parse --verify --quiet HEAD) \
-    || ! source_tree=$(git_src rev-parse --verify --quiet HEAD:docs/partner); then
-    fail 0 "$src has no commit with docs/partner at HEAD"
+    || ! source_tree=$(git_src rev-parse --verify --quiet HEAD:docs/partner/); then
+    fail 0 "$src has no commit with a docs/partner directory at HEAD"
 else
-    dirty=$(git_src status --porcelain --untracked-files=all -- docs/partner)
-    if [[ -n $dirty ]]; then
-        fail 0 "docs/partner has uncommitted changes, so source_tree would not describe the site:
-$dirty"
-    fi
+    head_ok=true
 fi
 
-# Every file the site copies must be tracked, or source_tree would not cover it.
-# A file that is missing is left to gate 1.
-tracked() {
-    [[ ! -e $src/$1 ]] && return 0
-    git_src ls-files --error-unmatch -- "$1" >/dev/null 2>&1 \
-        || fail 0 "$1 is not tracked by git, so source_tree does not cover it"
+# committed PATH: gate 0 for one file the build reads, PATH relative to <src>.
+# It is a regular file, not a symbolic link, and holds exactly the bytes of the
+# blob HEAD records at PATH, so source_commit and source_tree describe what is
+# served. --no-filters hashes the bytes as they are, with no filter or
+# line-ending conversion from <src>. A missing file is left to gate 1.
+committed() {
+    local want have
+    if [[ -L $src/$1 ]]; then
+        fail 0 "$1 is a symbolic link; the build reads only regular files"
+    elif [[ -f $src/$1 ]]; then
+        if ! want=$(git_src rev-parse --verify --quiet "HEAD:$1"); then
+            fail 0 "$1 is not in HEAD (untracked, ignored or not committed), so source_tree does not cover it"
+        elif ! have=$(git_src hash-object --no-filters -- "$1" 2>"$work/git.err"); then
+            fail 0 "cannot hash $1: $(head -n 1 -- "$work/git.err")"
+        elif [[ $have != "$want" ]]; then
+            fail 0 "$1 differs from the file HEAD records (changed and not committed), so source_tree does not describe it"
+        fi
+    fi
 }
 
-# Gate 1: shared assets.
+# Gate 1: shared assets, and the logo is the reviewed file. Gate 0: each asset
+# is the file HEAD records.
 for a in "${ASSETS[@]}"; do
     from=${a%% *}
     [[ -f $partner/assets/$from ]] || fail 1 "missing shared asset docs/partner/assets/$from"
-    if [[ -n ${source_commit:-} ]]; then tracked "docs/partner/assets/$from"; fi
+    if $head_ok; then committed "docs/partner/assets/$from"; fi
 done
+if [[ -f $partner/assets/$LOGO ]]; then
+    if ! sum=$(sha256sum <"$partner/assets/$LOGO"); then
+        fail 1 "cannot read docs/partner/assets/$LOGO"
+    elif [[ ${sum%% *} != "$LOGO_SHA256" ]]; then
+        fail 1 "docs/partner/assets/$LOGO is not the reviewed logo (its SHA-256 is ${sum%% *}); review the new file, then set LOGO_SHA256 in build-site.sh to that hash"
+    fi
+fi
 
 titles=()
 versions=()
@@ -213,12 +246,12 @@ for i in "${!STEMS[@]}"; do
     yaml=$dir/metadata.yaml
     pdf=$dir/$stem.pdf
 
-    # Gate 1: the three files.
+    # Gate 1: the three files. Gate 0: each is the file HEAD records.
     for f in "$md" "$yaml" "$pdf"; do
         [[ -f $f ]] || fail 1 "$stem: missing $rel/${f##*/}"
     done
-    if [[ -n ${source_commit:-} ]]; then
-        for f in "$stem.md" metadata.yaml "$stem.pdf"; do tracked "$rel/$f"; done
+    if $head_ok; then
+        for f in "$stem.md" metadata.yaml "$stem.pdf"; do committed "$rel/$f"; done
     fi
 
     # Gate 2: a whole PDF file.
@@ -314,7 +347,6 @@ fi
 # ---- build ---------------------------------------------------------------------
 
 tmp=$(mktemp -d "$out_parent/.${out##*/}.tmp.XXXXXX")
-chmod 755 "$tmp"
 mkdir -p "$tmp/assets/fonts"
 
 for a in "${ASSETS[@]}"; do
@@ -415,6 +447,10 @@ if [[ $failures -gt 0 ]]; then
     printf 'error: %d gate failure(s); nothing was built\n' "$failures" >&2
     exit 1
 fi
+
+# Files readable and directories searchable by everyone, whatever the umask, so
+# Pages can serve the tree.
+chmod -R u=rwX,go=rX -- "$tmp" || die "cannot set the modes of the built site"
 
 # rename(2) replaces an empty directory in one step, so <out> is never half built.
 mv -T -- "$tmp" "$out" || die "cannot move the built site into $out"

@@ -3,6 +3,8 @@
 This repo publishes the four partner PDFs of tn-node-deployment (`docs/partner`) at <https://run.telcoin.network>, with a landing page and short links.
 The PDFs are not stored here.
 Each build reads them from `main` of [Telcoin-Association/tn-node-deployment](https://github.com/Telcoin-Association/tn-node-deployment), checks them and deploys the result to GitHub Pages.
+Whoever can merge to `main` of tn-node-deployment decides what the next run publishes.
+Whoever can push to `main` of this repo decides how: the build script, its checks and the workflow.
 
 ## Links
 
@@ -22,7 +24,7 @@ The version and date are printed on page 1 of each PDF and on the landing page.
 
 ## Publish
 
-After a change to a partner PDF merges in tn-node-deployment, run the Publish workflow on `main` of this repo, from the Actions tab or with:
+After a change under `docs/partner` merges in tn-node-deployment, run the Publish workflow on `main` of this repo, from the Actions tab or with:
 
 ```sh
 gh workflow run publish.yml --repo Telcoin-Association/tn-partner-site --ref main
@@ -72,8 +74,8 @@ Each PDF present prints `OK`; `--ignore-missing` skips the ones that are not the
 
 | Gate | Check |
 |---|---|
-| 0 | `docs/partner` exists in a git checkout, has no modified, deleted or untracked file, and every file the site copies is tracked, so `source_tree` describes exactly what is served |
-| 1 | each document has its `.md`, `metadata.yaml` and `.pdf`, and the shared assets (fonts, logo) exist |
+| 0 | the build reads from the top of a tn-node-deployment git checkout whose `HEAD` has a `docs/partner` directory, and every file it reads (the three files of each document and the five shared assets) is a regular file, not a symbolic link, with exactly the bytes `HEAD` records, so `source_commit` and `source_tree` describe exactly what is served |
+| 1 | each document has its `.md`, `metadata.yaml` and `.pdf`, the shared assets (fonts, logo) exist, and the logo is the reviewed file whose SHA-256 is `LOGO_SHA256` in `build-site.sh` |
 | 2 | each PDF is non-empty, starts with `%PDF-` and ends with `%%EOF` |
 | 3 | `version` is `X.Y` or `X.Y.Z`, `date` is an English month name and a four-digit year, and the `.md` has exactly one non-empty `# ` heading outside code fences |
 | 4 | page 1 of the PDF has the line `Version <version> · <date>`, which catches a PDF not rebuilt after a metadata change |
@@ -85,7 +87,10 @@ Each failure prints `error: gate <n>: ...` with the document it concerns.
 Gates 0 to 5 are reported together for all four documents; a check that an earlier failure makes meaningless for a document is skipped (a truncated PDF is not searched for text).
 Gate 6 runs once they pass.
 The script exits 0 when the site is built, 1 when a gate failed, and 2 on a usage or environment error such as a missing tool.
-Failures of gates 1 to 5 are fixed in tn-node-deployment and then published with a new run; gate 6 points at `build-site.sh` or `site/` in this repo.
+Failures of gates 1 to 5 are fixed in tn-node-deployment and then published with a new run.
+The exception is a new logo, which fails gate 1 until its hash is in `LOGO_SHA256` here (see [Add or rename a document](#add-or-rename-a-document)).
+Gate 6 points at `build-site.sh` or `site/` in this repo.
+Files under `docs/partner` that the build does not read, such as `theme.css` or `template.html`, are not checked and never reach the site.
 
 ## Build locally
 
@@ -94,25 +99,29 @@ The script needs `git`, `pdftotext` (from poppler-utils), `sha256sum` and `awk`.
 ```sh
 git clone https://github.com/Telcoin-Association/tn-node-deployment src
 bash build-site.sh src _site
-python3 -m http.server --directory _site
+python3 -m http.server --bind 127.0.0.1 --directory _site
 ```
 
-Then open <http://localhost:8000>.
+Then open <http://127.0.0.1:8000>.
 The output directory must not exist or must be empty.
 The script never deletes it, so remove `_site` before a rebuild; a failed run does not create or fill it.
 It reads `src` as data and never writes to it.
-To preview a docs branch, check it out in `src` first; uncommitted changes under `docs/partner` fail gate 0.
+To preview a docs branch, check it out in `src` first; an uncommitted change to a file the site reads fails gate 0.
 
 ## Add or rename a document
 
 The documents are listed in the table at the top of `build-site.sh`, in landing order, with the expected output file list (gate 6) beside it.
-Change both.
+Change both, and also `site/404.html`, which names the four short links, and the [Links](#links) table in this README.
 Each entry names a directory under `docs/partner` in tn-node-deployment and a short alias.
 The directory name is also the file stem: the directory holds `<stem>.md`, `metadata.yaml` and `<stem>.pdf`.
 Merge a new document in tn-node-deployment first, or the run here fails gate 1.
 
 Short links are part of what partners have been sent, so an alias is never renamed or removed once shared.
 Renaming a document changes its PDF URL and the old one returns 404; keep the alias, which then forwards to the new file.
+
+The logo is pinned: `LOGO_SHA256` in `build-site.sh` holds the SHA-256 of the reviewed `docs/partner/assets/logos/telcoin-network-light.svg`, and any other file fails gate 1.
+The site serves the SVG from its own origin, and an SVG can carry script.
+After a logo change in tn-node-deployment, review the new file, put its SHA-256 (from `sha256sum`) in `LOGO_SHA256` and push to `main` here.
 
 ## Automatic publishing later
 
@@ -127,22 +136,30 @@ gh api repos/Telcoin-Association/tn-partner-site/dispatches -f event_type=partne
 
 ## One-time setup
 
-This was done once and is kept for the record and for a rebuild of the site.
+Follow these steps once, after the repo is created on GitHub.
 
-1. Org settings, Pages, Verified domains: `telcoin.network` is verified.
+1. Org settings, Pages, Verified domains: check that `telcoin.network` is verified, and verify it if not.
    This blocks a takeover of the subdomain if the site is ever unpublished.
-2. Repo settings, Pages, Source: GitHub Actions.
-3. Repo settings, Environments, `github-pages`: deployment branches limited to `main`.
-4. Recommended: a ruleset on `main` that requires a pull request.
+   Keep the org's `_github-pages-challenge-…` TXT record at the DNS host for as long as the site exists.
+2. Repo settings, Pages, Source: choose GitHub Actions.
+3. Repo settings, Environments, `github-pages`: limit deployment branches to `main`.
+4. Recommended: add a ruleset on `main` that requires a pull request.
 5. Push to `main` or run the workflow.
    The first deploy goes to <https://telcoin-association.github.io/tn-partner-site/>.
    Check the site there before setting the domain, because that URL redirects once a custom domain is set.
    The 404 page uses root-absolute links, so it only looks right on the custom domain.
-6. Repo settings, Pages, Custom domain: `run.telcoin.network`.
+6. Repo settings, Pages, Custom domain: enter `run.telcoin.network`.
    At the DNS host (Vercel), add the record `run` CNAME `telcoin-association.github.io`.
    The explicit record is required: `telcoin.network` has a wildcard record that would otherwise send the name to Vercel.
    Do these two back to back.
 7. Wait for "DNS check successful" and the certificate, then tick "Enforce HTTPS".
+   Share the links only after that.
+8. Confirm that a run from another branch cannot deploy.
+   Push a throwaway branch whose copy of `.github/workflows/publish.yml` has the `if:` line and the `environment:` block removed from the `deploy` job, run the workflow on that branch, and expect the deploy to be refused.
+   Then delete the branch.
+   If it deploys, restore the site with a run on `main` and restrict who can push branches to this repo.
+
+To retire the site, delete the `run` DNS record first, then remove the custom domain.
 
 ## Checks after a deploy
 
@@ -161,6 +178,9 @@ for a in testnet mainnet guide spec; do
   printf '%s: ' "$a"
   curl -fsSL "https://run.telcoin.network/$a/" | grep -o 'url=[^"]*'
 done
+
+# The PDFs print the short link without a trailing slash: 301 with "location: /guide/".
+curl -sSI https://run.telcoin.network/guide | grep -iE '^(HTTP|location)'
 
 # 404, and a browser shows this site's 404 page rather than GitHub's.
 curl -sS -o /dev/null -w '%{http_code}\n' https://run.telcoin.network/no-such-page

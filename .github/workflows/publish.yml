@@ -18,10 +18,12 @@ on:
 
 permissions: {}
 
-# Allow one concurrent Pages deploy; never cancel an in-flight one (a cancelled
-# deploy can leave Pages in a half-updated state).
+# One deploy at a time per branch, and an in-flight deploy is never cancelled (a
+# cancelled deploy can leave Pages half updated). The group is per branch: a run
+# started from another branch builds without deploying, and in one shared group
+# it could replace a pending run of main, whose publish would then be dropped.
 concurrency:
-  group: pages
+  group: pages-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
