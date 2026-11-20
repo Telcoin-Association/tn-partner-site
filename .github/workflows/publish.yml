@@ -1,0 +1,73 @@
+name: Publish
+
+# Publishes https://run.telcoin.network to GitHub Pages: a landing page, the four
+# partner PDFs and their short links. The PDFs are read at build time from
+# docs/partner on main of Telcoin-Association/tn-node-deployment; nothing from that
+# repo is stored here. build-site.sh checks the PDFs and the built tree before
+# anything is uploaded, so a failed check leaves the live site as it was.
+# After a partner PDF change merges in tn-node-deployment, publish it with a manual
+# run of this workflow on main (Actions tab, or
+# `gh workflow run publish.yml --repo Telcoin-Association/tn-partner-site --ref main`).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  # For a sender in tn-node-deployment; none is set up yet (see README.md).
+  repository_dispatch:
+    types: [partner-docs-updated]
+
+permissions: {}
+
+# Allow one concurrent Pages deploy; never cancel an in-flight one (a cancelled
+# deploy can leave Pages in a half-updated state).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # tn-node-deployment is public, so no token or secret is passed. Only
+      # docs/partner is needed.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Telcoin-Association/tn-node-deployment
+          ref: main
+          path: src
+          sparse-checkout: docs/partner
+          persist-credentials: false
+      - name: Install pdftotext if missing
+        run: |
+          if ! command -v pdftotext >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends poppler-utils
+          fi
+      # Every gate runs before _site exists; a failure ends the run here.
+      - name: Build and check the site
+        run: bash build-site.sh src _site
+      # No CNAME file: with GitHub Actions as the Pages source, the custom domain
+      # (run.telcoin.network) is a repository setting, not part of the artifact.
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    # A manual run on another branch builds and checks but does not deploy.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

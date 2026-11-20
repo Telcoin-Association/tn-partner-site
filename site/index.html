@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<!--
+  Template for the landing page of run.telcoin.network. build-site.sh copies it
+  to index.html and replaces two lines, each of which must stay alone on its line:
+  the documents line becomes one entry per PDF, and the source line becomes the
+  provenance paragraph of the footer. Every link to the site is relative, so the
+  page also works under the github.io project URL.
+-->
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Run a Telcoin Network node</title>
+  <meta name="description" content="Hardware requirements for testnet and mainnet, the operator guide and the protocol specification for running a Telcoin Network node.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="band">
+    <div class="wrap">
+      <img class="logo" src="assets/telcoin-network.svg" alt="Telcoin Network" width="262" height="41">
+      <div class="rule"></div>
+      <h1>Run a Telcoin Network node</h1>
+      <p class="lead">Hardware requirements for testnet and mainnet, the operator guide and the protocol specification, as PDFs.</p>
+    </div>
+  </header>
+  <main class="wrap">
+    <ul class="docs">
+@@DOCS@@
+    </ul>
+  </main>
+  <footer class="wrap foot">
+    <p>Questions about running a node: <a href="mailto:devs@telcoin.org">devs@telcoin.org</a></p>
+@@SOURCE@@
+  </footer>
+</body>
+</html>
