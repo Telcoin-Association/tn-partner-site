@@ -107,6 +107,7 @@ Then open <http://127.0.0.1:8000>.
 The output directory must not exist or must be empty.
 The script never deletes it, so remove `_site` before a rebuild; a failed run does not create or fill it.
 It reads `src` as data and never writes to it.
+Nothing should change `src` while a build runs, because the files are checked first and copied afterwards.
 To preview a docs branch, check it out in `src` first; an uncommitted change to a file the site reads fails gate 0.
 
 ## Add or rename a document

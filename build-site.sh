@@ -126,10 +126,12 @@ human_size() {
 
 # git_src ARGS...: git in <src>. The script runs only rev-parse and
 # hash-object --no-filters there; neither reads the index nor applies a filter,
-# so nothing configured in <src> runs. No optional locks and no fsmonitor hook
-# as a second guard.
+# so nothing configured in <src> runs. No replace refs, so the objects named are
+# the real ones. No transport (GIT_ALLOW_PROTOCOL=none), so a partial clone
+# cannot fetch and no command configured as a remote can run. No optional locks
+# and no fsmonitor hook as a second guard.
 git_src() {
-    git -C "$src" -c core.fsmonitor=false --no-optional-locks "$@"
+    GIT_ALLOW_PROTOCOL=none git -C "$src" --no-replace-objects -c core.fsmonitor=false --no-optional-locks "$@"
 }
 
 # ---- arguments and environment ----------------------------------------------------
